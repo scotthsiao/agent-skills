@@ -43,6 +43,10 @@ import urllib.request
 
 DOMAIN = os.environ.get("LARK_DOMAIN", "lark")
 HOST = "https://open.feishu.cn" if DOMAIN == "feishu" else "https://open.larksuite.com"
+# The authorize step lives on the ACCOUNTS host, not the open-apis host, and on
+# the v1 path — even though the token exchange below is v2. This asymmetry is
+# per Lark's own docs and is the usual cause of a 404 on the consent URL.
+ACCOUNTS_HOST = "https://accounts.feishu.cn" if DOMAIN == "feishu" else "https://accounts.larksuite.com"
 ENV_FILE = os.path.expanduser(os.environ.get("LARK_ENV_FILE", "~/.hermes/.env"))
 CREDS = os.path.expanduser(os.environ.get("LARK_USER_CREDS", "~/.config/lark/user_token.json"))
 REDIRECT_URI = os.environ.get("LARK_REDIRECT_URI", "http://localhost:9899")
@@ -51,7 +55,7 @@ SCOPES = os.environ.get(
     "offline_access drive:drive:readonly docx:document:readonly "
     "sheets:spreadsheet:readonly drive:export:readonly",
 )
-AUTHORIZE_EP = f"{HOST}/open-apis/authen/v2/oauth/authorize"
+AUTHORIZE_EP = f"{ACCOUNTS_HOST}/open-apis/authen/v1/authorize"
 TOKEN_EP = f"{HOST}/open-apis/authen/v2/oauth/token"
 
 
@@ -105,7 +109,6 @@ def cmd_authorize():
     params = {
         "client_id": cid,
         "redirect_uri": REDIRECT_URI,
-        "response_type": "code",
         "scope": SCOPES,
         "state": state,
     }
