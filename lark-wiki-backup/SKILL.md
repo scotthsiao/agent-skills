@@ -108,20 +108,50 @@ Per Drive item:
 | shortcut | skipped (not followed) |
 | anything else | skipped with a warning |
 
-### getting a user token for cron
+### getting a user token — `scripts/lark_user_token.py`
 
-The token must be fresh at run time. Options for `LARK_USER_TOKEN_CMD`:
+A user_access_token lasts ~2h; the `refresh_token` lasts ~30 days and **rotates on
+every use**. `scripts/lark_user_token.py` handles the whole lifecycle — do the
+browser step once, then point `LARK_USER_TOKEN_CMD` at it.
 
-- **Wrap `@larksuite/cli`** — after `lark-cli auth login --identity user-default`
-  once, the CLI refreshes its own token; a tiny wrapper that prints the current
-  access token (check `lark-cli auth --help` for a token/print subcommand on your
-  version) is the least-effort path.
-- **A refresh script** — store the `refresh_token` from your OAuth once, and have the
-  command do `POST /open-apis/authen/v1/oidc/refresh_access_token` and print
-  `data.access_token`. ~15 lines; same shape as
-  [`gdrive-token-refresh`](../gdrive-token-refresh/)'s check script.
+**One-time setup:**
 
-For a one-off manual run you can instead `export LARK_USER_TOKEN=<paste>` directly.
+1. In the Lark **developer console** for the app whose credentials you'll use:
+   - **Security settings → Redirect URLs**: add `http://localhost:9899`
+   - **Permissions**: grant `drive:drive:readonly`, `docx:document:readonly`,
+     `sheets:spreadsheet:readonly`, `drive:export:readonly`, **and `offline_access`**
+     (without it Lark returns no refresh_token). Publish a version.
+2. Provide the app creds (same `FEISHU_APP_ID` / `FEISHU_APP_SECRET`, via env or
+   `LARK_ENV_FILE`), then:
+   ```bash
+   python3 scripts/lark_user_token.py authorize
+   # open the printed URL, log in as the account whose Drive you're backing up, approve.
+   # the browser lands on a dead http://localhost:9899/?code=... page — copy that URL.
+   python3 scripts/lark_user_token.py exchange "http://localhost:9899/?code=...&state=..."
+   # -> prints the first access_token, saves the refresh_token to
+   #    ~/.config/lark/user_token.json (chmod 600)
+   ```
+
+**Then wire the cron env:**
+
+```bash
+export LARK_USER_TOKEN_CMD='python3 /abs/path/scripts/lark_user_token.py'
+```
+
+Each run of that command refreshes and prints **only** the access token on stdout,
+persisting the rotated refresh_token. If the refresh_token ever expires (30 days
+unused, or revoked), re-run `authorize` + `exchange`.
+
+Env for the token script: `LARK_USER_CREDS` (store path),
+`LARK_OAUTH_SCOPES` (override the scope list), `LARK_REDIRECT_URI` (match your
+console entry), `LARK_DOMAIN`.
+
+**Alternative:** if you already use [`@larksuite/cli`](../lark-openapi-recipes/) with
+`--identity user-default`, it manages its own token refresh — check
+`lark-cli auth --help` for a print-token subcommand and wrap that instead.
+
+For a **one-off manual run**, skip all of the above and just
+`export LARK_USER_TOKEN=<paste a token>`.
 
 What it writes under `BACKUP_ROOT`:
 
