@@ -86,6 +86,10 @@ def _post_json(url, payload):
         return json.loads(e.read().decode())
 
 
+def _load_creds():
+    return json.load(open(CREDS)) if os.path.exists(CREDS) else {}
+
+
 def _save_creds(data):
     os.makedirs(os.path.dirname(CREDS), exist_ok=True)
     tmp = CREDS + ".tmp"
@@ -105,7 +109,9 @@ def cmd_authorize():
         "scope": SCOPES,
         "state": state,
     }
-    _save_creds({"pending_state": state})
+    creds = _load_creds()
+    creds["pending_state"] = state          # keep any existing refresh_token
+    _save_creds(creds)
     print("Open this URL, log in, and approve:\n")
     print(AUTHORIZE_EP + "?" + urllib.parse.urlencode(params))
     print(f"\nYour browser will fail to load {REDIRECT_URI}/?code=... — that's fine.")
@@ -131,10 +137,11 @@ def cmd_exchange(redirect_url):
     if not resp.get("refresh_token"):
         sys.exit("no refresh_token returned — add the `offline_access` scope in the "
                  "console, publish a version, and re-run `authorize`.")
-    _save_creds({
-        "refresh_token": resp["refresh_token"],
-        "obtained": int(time.time()),
-    })
+    creds = _load_creds()
+    creds.pop("pending_state", None)
+    creds["refresh_token"] = resp["refresh_token"]
+    creds["obtained"] = int(time.time())
+    _save_creds(creds)
     print(resp["access_token"])
     print(f"# saved refresh_token to {CREDS}", file=sys.stderr)
 
@@ -143,7 +150,7 @@ def cmd_token():
     cid, csec = _app_creds()
     if not os.path.exists(CREDS):
         sys.exit(f"{CREDS} not found — run `authorize` then `exchange` first")
-    creds = json.load(open(CREDS))
+    creds = _load_creds()
     rt = creds.get("refresh_token")
     if not rt:
         sys.exit("no refresh_token stored — run `authorize` then `exchange`")

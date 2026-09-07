@@ -157,6 +157,47 @@ python3 scripts/archive_snapshot.py
 
 ---
 
+## 幫多個人備份（共用一個 app）
+
+**不需要每個人各自申請 App ID / Secret。** App ID / Secret 代表的是「OAuth 用戶端
+（應用程式）」，不是使用者。使用者身分來自第 5 步 `authorize` 時**誰登入、誰同意授權**。
+
+所以一個 app（例如你的）當共用 OAuth client，每位同事各自跑一次 `authorize`、用**自己
+的帳號**登入，就會拿到綁定「(這個 app, 那個人)」的專屬 refresh token。
+
+需要滿足：
+
+1. **App 的可用範圍要包含這些同事。** 若 app 限定特定成員/部門，同事要在範圍內；若是
+   企業自建應用且已發布給全組織就沒問題。範圍不夠要改「可用範圍」（發布給組織通常需要
+   管理員審核，或把同事加為協作者/測試人員）。
+2. **App Secret 放在哪** — 兩種做法：
+   - **建議：所有備份都跑在你控制的一台機器上。** Secret 只存在一處，每位同事只要開
+     一次授權連結、用自己帳號登入即可。用 `LARK_USER_CREDS` 幫每個人分開存 token：
+     ```bash
+     # 對每位同事，換一個 creds 路徑跑一次 authorize + exchange
+     export LARK_USER_CREDS=~/.config/lark/alice.json
+     python3 scripts/lark_user_token.py authorize
+     # 把 URL 傳給 Alice，她登入後把 redirect URL 回傳給你
+     python3 scripts/lark_user_token.py exchange "http://localhost:9899/?code=..."
+
+     # 該同事的備份 job 就帶對應的 creds 路徑：
+     LARK_USER_CREDS=~/.config/lark/alice.json \
+     LARK_USER_TOKEN_CMD="LARK_USER_CREDS=~/.config/lark/alice.json python3 $PWD/scripts/lark_user_token.py" \
+     BACKUP_ROOT=~/lark-drive/alice \
+       python3 scripts/lark_wiki_backup.py
+     ```
+   - 若同事要在**自己的機器**上跑，他們的環境裡就會有 App Secret — 只在信任的團隊內
+     這樣做。
+
+3. **如果這是公司認可的備份需求**，比起逐人 OAuth，更乾淨的做法是走 Lark **管理員後台
+   的資料匯出**功能，或請 IT 統一處理。
+
+> 提醒：`authorize` 會把 `pending_state` 寫進 `LARK_USER_CREDS` 指的檔案，`exchange` 再
+> 寫入 refresh token。多人共用一台機器時，**每個人一定要用不同的 `LARK_USER_CREDS`
+> 路徑**，否則會互相覆蓋。
+
+---
+
 ## Part B — 備份知識庫空間
 
 ### 1. 把 app 加進空間
