@@ -143,10 +143,12 @@ def cmd_exchange(redirect_url):
     creds = _load_creds()
     creds.pop("pending_state", None)
     creds["refresh_token"] = resp["refresh_token"]
+    creds["scope"] = resp.get("scope", "")
     creds["obtained"] = int(time.time())
     _save_creds(creds)
     print(resp["access_token"])
     print(f"# saved refresh_token to {CREDS}", file=sys.stderr)
+    print(f"# granted scopes: {resp.get('scope', '(none reported)')}", file=sys.stderr)
 
 
 def cmd_token():
@@ -168,9 +170,17 @@ def cmd_token():
         sys.exit(f"refresh failed: {resp}  (refresh_token may be expired — re-authorize)")
     # persist the ROTATED refresh_token
     creds["refresh_token"] = resp.get("refresh_token", rt)
+    if resp.get("scope"):
+        creds["scope"] = resp["scope"]
     creds["refreshed"] = int(time.time())
     _save_creds(creds)
     print(resp["access_token"])   # stdout: nothing but the token
+
+
+def cmd_scopes():
+    creds = _load_creds()
+    print(creds.get("scope") or "(no scope recorded — run exchange, or the token "
+          "response reported none)")
 
 
 if __name__ == "__main__":
@@ -181,6 +191,8 @@ if __name__ == "__main__":
         if len(sys.argv) < 3:
             sys.exit('usage: lark_user_token.py exchange "<redirect URL or code>"')
         cmd_exchange(sys.argv[2])
+    elif cmd == "scopes":
+        cmd_scopes()
     elif cmd in ("token", ""):
         cmd_token()
     else:

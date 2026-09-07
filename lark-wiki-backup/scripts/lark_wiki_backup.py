@@ -290,23 +290,25 @@ def wiki_enrich(item, token, cache):
 
 
 # --------------------------------------------------------------- DRIVE adapter
-def drive_root(token):
-    s, c = call(f"{HOST}/open-apis/drive/explorer/v2/root_folder/meta", token=token)
-    if s != 200 or not isinstance(c, dict) or c.get("code") != 0:
-        sys.exit(f"could not read personal root folder: {s} {c} "
-                 "(token needs the drive read scope; or set LARK_DRIVE_FOLDER_TOKEN)")
-    return c["data"]["token"]
-
-
 def drive_children(token, folder_token):
+    """List a folder's files. folder_token None/empty => personal root ("My Space")."""
     out, page = [], None
     while True:
-        url = (f"{HOST}/open-apis/drive/v1/files?folder_token={folder_token}"
-               f"&page_size=200&order_by=EditedTime&direction=DESC"
-               + (f"&page_token={page}" if page else ""))
-        s, c = call(url, token=token)
+        qs = "page_size=200&order_by=EditedTime&direction=DESC"
+        if folder_token:
+            qs += f"&folder_token={folder_token}"
+        if page:
+            qs += f"&page_token={page}"
+        s, c = call(f"{HOST}/open-apis/drive/v1/files?{qs}", token=token)
         if s != 200 or not isinstance(c, dict) or c.get("code") != 0:
-            print(f"[drive] list failed in {folder_token}: {s} {c}", file=sys.stderr)
+            where = folder_token or "root"
+            hint = ""
+            if isinstance(c, dict) and c.get("code") == 99991679:
+                hint = ("  -> user token is missing the drive read scope. "
+                        "Add `drive:drive:readonly` under the app's Permissions, "
+                        "publish a version, then re-run `lark_user_token.py authorize` "
+                        "+ `exchange` (an existing token does NOT gain scopes).")
+            print(f"[drive] list failed in {where}: {s} {c}{hint}", file=sys.stderr)
             return out
         data = c.get("data", {})
         out.extend(data.get("files", []))
@@ -317,9 +319,9 @@ def drive_children(token, folder_token):
 
 
 def drive_list(token):
-    root = DRIVE_FOLDER_TOKEN or drive_root(token)
-    print(f"node list: Drive walk from {root}"
-          + ("" if DRIVE_FOLDER_TOKEN else " (personal root / My Space)"))
+    root = DRIVE_FOLDER_TOKEN or None
+    print("node list: Drive walk from "
+          + (f"folder {root}" if root else "personal root / My Space"))
     items = []
 
     def walk(folder_token, depth, parent):
