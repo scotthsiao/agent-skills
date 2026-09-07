@@ -1,37 +1,35 @@
-# lark-wiki-backup — setup runbook
+# lark-wiki-backup — 安裝操作手冊
 
-A step-by-step for standing up a Lark/Feishu backup on a headless box or container.
-`SKILL.md` is the reference (and what an agent reads); this is the human walk-through.
+在無頭主機或容器上把 Lark/Feishu 內容備份下來的逐步流程。`SKILL.md` 是給 agent 讀的
+參考文件，這份是給人照做的操作手冊。
 
-Two things can be backed up — pick one to start:
+可以備份兩種東西，先挑一種開始：
 
-- **A wiki space** (知识库) — team knowledge base. Auth = an app that's a space member.
-- **A personal / shared Drive folder** (我的空间) — your own cloud files. Auth = your
-  own login (OAuth).
+- **知識庫空間（Wiki space）** — 團隊知識庫。認證方式：一個「加入該空間」的 app。
+- **個人 / 共享雲端資料夾（我的空間）** — 你自己的雲端檔案。認證方式：你自己的登入（OAuth）。
 
-Both produce the same thing: a local git repo of the content, updated incrementally,
-with an optional offsite `.tar.gz`.
+兩者產出一樣：內容的本地 git repo，增量更新，外加一份可選的異地 `.tar.gz`。
 
 ---
 
-## Part A — back up a personal / shared Drive folder
+## Part A — 備份個人 / 共享雲端資料夾
 
-### 1. Prerequisites
+### 1. 前置需求
 
-- `git`, Python 3.9+ on the box.
-- A Lark app you can configure (the same App ID / Secret used elsewhere is fine — you
-  are not adding a bot, just using it as an OAuth client).
-- The account whose Drive you want to back up, and a browser **once** for the login.
+- 主機上要有 `git`、Python 3.9+。
+- 一個你能設定的 Lark app（沿用現有的 App ID / Secret 就行 — 這裡不是加 bot，只是把它
+  當 OAuth client 用）。
+- 你要備份哪個帳號的雲端空間，就用那個帳號，另外需要一次瀏覽器登入。
 
-### 2. Configure the app in the developer console
+### 2. 在開發者後台設定 app
 
-Open <https://open.larksuite.com/> (or `open.feishu.cn`) → your app.
+開 <https://open.larksuite.com/>（或 `open.feishu.cn`）→ 你的 app。
 
-1. **Security settings → Redirect URLs** → add exactly:
+1. **安全設定 → 重定向 URL** → 加上（要完全一致）：
    ```
    http://localhost:9899
    ```
-2. **Permissions & Scopes** → add:
+2. **權限管理** → 加入：
    ```
    offline_access
    drive:drive:readonly
@@ -39,71 +37,67 @@ Open <https://open.larksuite.com/> (or `open.feishu.cn`) → your app.
    sheets:spreadsheet:readonly
    drive:export:readonly
    ```
-   `offline_access` is required — without it Lark won't issue a refresh token and the
-   cron job can't renew itself.
-3. **Version Management** → create and publish a version. Scope changes don't take
-   effect until published.
+   `offline_access` 是必要的 — 少了它 Lark 不會發 refresh token，cron 就無法自己續期。
+3. **版本管理** → 建立並發布版本。權限變更沒發布不會生效。
 
-### 3. Get the code and the token helper
+### 3. 取得程式碼與 token 工具
 
 ```bash
 git clone https://github.com/scotthsiao/agent-skills ~/src/agent-skills
 cd ~/src/agent-skills/lark-wiki-backup
 ```
 
-### 4. Give the helper your app credentials
+### 4. 提供 app 憑證給工具
 
-Either export them:
+用 export：
 
 ```bash
 export FEISHU_APP_ID=cli_xxxxxxxx
 export FEISHU_APP_SECRET=xxxxxxxx
 ```
 
-…or point at a dotenv that has `FEISHU_APP_ID` / `FEISHU_APP_SECRET`:
+……或指向一個含有 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 的 dotenv：
 
 ```bash
 export LARK_ENV_FILE=~/.hermes/.env
 ```
 
-### 5. Authorize once (needs a browser)
+### 5. 授權一次（需要瀏覽器）
 
 ```bash
 python3 scripts/lark_user_token.py authorize
 ```
 
-- Open the printed URL in a browser.
-- Log in **as the account whose Drive you're backing up**, and approve.
-- The browser ends on a "can't reach this page" at
-  `http://localhost:9899/?code=...&state=...` — that's expected. Copy the whole
-  address-bar URL.
+- 用瀏覽器開印出來的 URL。
+- **用你要備份的那個帳號登入**，然後同意授權。
+- 瀏覽器最後會停在打不開的頁面
+  `http://localhost:9899/?code=...&state=...` — 這是正常的。把整條網址列複製起來。
 
 ```bash
 python3 scripts/lark_user_token.py exchange "http://localhost:9899/?code=...&state=..."
 ```
 
-This prints the first access token and saves the (rotating) refresh token to
-`~/.config/lark/user_token.json` (mode 600).
+這會印出第一個 access token，並把（會輪替的）refresh token 存到
+`~/.config/lark/user_token.json`（權限 600）。
 
-### 6. Confirm the token refreshes
+### 6. 確認 token 能刷新
 
 ```bash
 python3 scripts/lark_user_token.py
 ```
 
-Should print a fresh access token and nothing else. This exact command is what the
-backup job will call.
+應該只印出一個新的 access token、其他什麼都沒有。這一行指令就是備份 job 之後要呼叫的。
 
-### 7. First backup — a small folder
+### 7. 第一次備份 — 先用一個小資料夾
 
-Don't point it at your whole Drive yet. Grab one folder's token from its URL
-(`https://…/drive/folder/<TOKEN>`):
+先別對著整個雲端空間。從某個資料夾的網址
+（`https://…/drive/folder/<TOKEN>`）取得它的 token：
 
 ```bash
 export LARK_SOURCE=drive
 export BACKUP_ROOT=~/lark-drive/test
 export LARK_USER_TOKEN_CMD="python3 $PWD/scripts/lark_user_token.py"
-export LARK_DRIVE_FOLDER_TOKEN=fldxxxxxxxx      # the small test folder
+export LARK_DRIVE_FOLDER_TOKEN=fldxxxxxxxx      # 那個測試用小資料夾
 
 mkdir -p "$BACKUP_ROOT" && git -C "$BACKUP_ROOT" init -q
 printf '%s\n' '.manifest.json' '.trash/' '*.tmp' > "$BACKUP_ROOT/.gitignore"
@@ -111,13 +105,12 @@ printf '%s\n' '.manifest.json' '.trash/' '*.tmp' > "$BACKUP_ROOT/.gitignore"
 python3 scripts/lark_wiki_backup.py
 ```
 
-Check `$BACKUP_ROOT` — you should see the folder's docs mirrored, a git commit, and
-a `.manifest.json`. Native docs come out as `.docx` / `.xlsx` / `.pdf`; uploaded
-files keep their original name.
+檢查 `$BACKUP_ROOT` — 應該看到資料夾內的文件被鏡像下來、一個 git commit、一個
+`.manifest.json`。原生文件會轉成 `.docx` / `.xlsx` / `.pdf`；上傳的檔案保留原檔名。
 
-### 8. Point it at the whole Drive
+### 8. 對著整個雲端空間跑
 
-Drop `LARK_DRIVE_FOLDER_TOKEN` and change `BACKUP_ROOT`:
+拿掉 `LARK_DRIVE_FOLDER_TOKEN`，換 `BACKUP_ROOT`：
 
 ```bash
 unset LARK_DRIVE_FOLDER_TOKEN
@@ -127,70 +120,66 @@ printf '%s\n' '.manifest.json' '.trash/' '*.tmp' > "$BACKUP_ROOT/.gitignore"
 python3 scripts/lark_wiki_backup.py
 ```
 
-With no folder token it starts from your personal root ("My Space") and walks
-everything.
+沒指定資料夾 token 時，它會從你的個人根目錄（「我的空間」）開始，把整棵樹走完。
 
-### 9. Schedule it
+### 9. 排程
 
-Two jobs, both "run a script, deliver its stdout, don't call the model":
+兩個 job，都是「執行腳本、把 stdout 原樣送出、不呼叫模型」：
 
-| job | schedule (local) | command |
+| job | 排程（在地時間） | 指令 |
 |---|---|---|
-| mirror | daily, early | `lark_wiki_backup.py` |
-| archive | daily, after the mirror | `archive_snapshot.py` |
+| mirror（鏡像） | 每天，早一點 | `lark_wiki_backup.py` |
+| archive（打包） | 每天，在 mirror 之後 | `archive_snapshot.py` |
 
-Cron runs in **UTC** — convert your local time (see the `cron-timezone-discipline`
-skill; e.g. Taipei 05:15 = `15 21 * * *`).
+cron 是跑 **UTC** 的 — 把在地時間換算過去（見 `cron-timezone-discipline` skill；
+例如台北 05:15 = `15 21 * * *`）。
 
-The job's environment needs: `LARK_SOURCE=drive`, `BACKUP_ROOT`,
-`LARK_USER_TOKEN_CMD`, and either the two `FEISHU_APP_*` vars or `LARK_ENV_FILE`.
+job 的環境需要：`LARK_SOURCE=drive`、`BACKUP_ROOT`、`LARK_USER_TOKEN_CMD`，以及
+`FEISHU_APP_*` 兩個變數或 `LARK_ENV_FILE`。
 
-**Offsite archive (optional):**
+**異地打包（可選）：**
 
 ```bash
 export ARCHIVE_SRC=~/lark-drive/my-space
 export ARCHIVE_NAME=my-lark-drive
-export ARCHIVE_UPLOAD=rclone            # needs an rclone remote; see headless-config-backup
+export ARCHIVE_UPLOAD=rclone            # 需要一個 rclone remote；見 headless-config-backup
 export RCLONE_REMOTE=gdrive
 export RCLONE_REMOTE_DIR="Lark Drive Backups"
 python3 scripts/archive_snapshot.py
 ```
 
-### 10. Maintenance
+### 10. 維護
 
-- The refresh token lasts ~30 days of inactivity and is **rotated on every use** —
-  as long as the daily job runs, it stays alive. If it lapses (or you revoke it),
-  redo step 5.
-- If a run prints a large `pruned N`, stop and check — it usually means the token
-  lost a scope or access, not that N files were really deleted. The script refuses
-  to run at all if the listing comes back empty.
+- refresh token 閒置約 30 天會過期，而且**每次使用都會輪替** — 只要每天的 job 有在跑，
+  它就一直活著。如果失效了（或你手動撤銷），重做第 5 步。
+- 如果某次執行印出很大的 `pruned N`，停下來檢查 — 通常代表 token 掉了某個 scope 或
+  失去存取權，不是真的刪了 N 個檔。如果清單回傳是空的，腳本會直接拒絕執行。
 
 ---
 
-## Part B — back up a wiki space
+## Part B — 備份知識庫空間
 
-### 1. Make the app a member of the space
+### 1. 把 app 加進空間
 
-In the wiki space → **Settings → Members** → add your app. Without this, the node
-listing returns nothing.
+在知識庫空間 → **設定 → 成員** → 加入你的 app。沒加的話節點清單會回傳空的。
 
-App scopes (console, then publish a version): `wiki:wiki:readonly`,
-`docx:document:readonly`, `drive:export:readonly`.
+app 權限（後台設定，然後發布版本）：`wiki:wiki:readonly`、`docx:document:readonly`、
+`drive:export:readonly`。
 
-### 2. Find the space id
+### 2. 找出 space id
 
 ```bash
 lark-cli wiki +space-list --as user
 ```
 
-or open any page in the space and call
-`wiki/v2/spaces/get_node?token=<page token>` — the response has `space_id`.
+或開空間裡任一頁，呼叫
+`wiki/v2/spaces/get_node?token=<page token>` — 回應裡有 `space_id`。
 
-### 3. Run
+### 3. 執行
 
 ```bash
 export LARK_SPACE_ID=7xxxxxxxxxxxxxxxxxx
-export LARK_ENV_FILE=~/.hermes/.env         # holds FEISHU_APP_ID / FEISHU_APP_SECRET
+export LARK_ENV_FILE=~/.hermes/.env         # 內含 FEISHU_APP_ID / FEISHU_APP_SECRET
 export BACKUP_ROOT=~/lark-wiki/team-space
 
 mkdir -p "$BACKUP_ROOT" && git -C "$BACKUP_ROOT" init -q
@@ -199,20 +188,20 @@ printf '%s\n' '.manifest.json' '.trash/' '*.tmp' > "$BACKUP_ROOT/.gitignore"
 python3 scripts/lark_wiki_backup.py
 ```
 
-No user token needed — the app's own `tenant_access_token` is enough for a wiki
-space it belongs to. Schedule and archive exactly as in Part A steps 9–10.
+不需要 user token — 空間成員身分下，app 自己的 `tenant_access_token` 就夠了。排程與
+打包跟 Part A 的第 9、10 步一樣。
 
 ---
 
-## Restore
+## 還原
 
-- **One page/file:** copy it back from `$BACKUP_ROOT` (or `.trash/` if it was deleted
-  upstream), re-upload to Lark by hand.
-- **History:** `git -C "$BACKUP_ROOT" log --follow -- "<path>"`,
-  `git checkout <sha> -- "<path>"`.
-- Lark has no bulk import — restoring *into* Lark is manual per document. What you
-  keep is the content, its full edit history, and something local tooling can read.
+- **單一頁面 / 檔案：** 從 `$BACKUP_ROOT` 複製回去（若是上游刪掉的，從 `.trash/` 拿），
+  手動重新上傳到 Lark。
+- **歷史版本：** `git -C "$BACKUP_ROOT" log --follow -- "<path>"`、
+  `git checkout <sha> -- "<path>"`。
+- Lark 沒有批次匯入 — 「還原回 Lark」是一份一份手動。你保住的是內容本身、完整編輯
+  歷史、以及一份本地工具能讀的副本。
 
-## Environment variable reference
+## 環境變數對照
 
-See the "Options (env)" table in [`SKILL.md`](SKILL.md).
+見 [`SKILL.md`](SKILL.md) 的「Options (env)」表格。
