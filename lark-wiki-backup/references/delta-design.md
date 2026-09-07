@@ -2,26 +2,43 @@
 
 Why `lark_wiki_backup.py` is built the way it is.
 
+## Source adapters
+
+The script is one delta engine with two pluggable adapters, each providing:
+
+- **`list(token)`** → flat `[{token, title, depth, parent, ...}]` for the whole tree
+- **`enrich(item, token, cache)`** → `{kind, content_token, change_key, ext, ...}` or
+  `None` to skip. `kind` is `export` (Lark-native doc → export task) or `download`
+  (uploaded file → fetched as-is).
+
+| adapter | list API | auth | change key |
+|---|---|---|---|
+| `wiki` | `wiki/v2/spaces/{space}/nodes?parent_node_token=` (+ per-node `get_node`) | `tenant_access_token` | `last_edit_time` |
+| `drive` | `drive/v1/files?folder_token=` (root from `drive/explorer/v2/root_folder/meta`) | `user_access_token` | `modified_time` |
+
+Everything below — manifest, transitions, git, the trash guard — is adapter-agnostic.
+
 ## The manifest is the state
 
 `.manifest.json` at the mirror root:
 
 ```json
 {
-  "<node_token>": {
+  "<token>": {
     "path": "Methodology/BDD approach.docx",
-    "last_edit_time": 1724500000,
+    "change_key": "1724500000",
     "fetched": 1724500123
   }
 }
 ```
 
-- **key = `node_token`**, not the file path — so a page that is *retitled* (path
-  changes) is still the same tracked entity. Titles are display; the token is
-  identity.
-- **`last_edit_time`** comes free in the `wiki/v2/spaces/{space}/nodes/{token}`
-  response — the change-detection key costs one metadata call per node, never a
-  content download.
+- **key = the Lark token** (wiki `node_token` or drive file `token`), not the file
+  path — so a page that is *retitled* (path changes) is still the same tracked
+  entity. Titles are display; the token is identity.
+- **`change_key`** is whatever the adapter reports as "last changed" —
+  `last_edit_time` for wiki, `modified_time` for drive. It comes free in a response
+  the crawl already makes, so change detection costs no extra content download.
+  (Older manifests stored this as `last_edit_time`; `load_manifest` migrates them.)
 - **`fetched`** is bookkeeping / debugging only.
 
 The manifest is **git-ignored**. It's a local cache of "what I have", not part of the
@@ -41,7 +58,7 @@ backup. If it's lost, the next run rebuilds it: existing files are re-registered
 On a stable space, a daily run is almost all "skip" + a couple of renames — a few
 dozen cheap metadata calls, no downloads.
 
-## The node list: live crawl vs. tree snapshot
+## The node list: live crawl vs. tree snapshot (wiki adapter)
 
 Two ways to get the list of nodes:
 
@@ -71,7 +88,25 @@ A genuinely empty space is indistinguishable from a permissions loss, and the sa
 assumption is the latter. Check the run output — a sudden "pruned N nodes" for large
 N is the warning sign.
 
-## Renames vs. content edits
+## Drive adapter specifics
+
+- **Auth is user-scoped.** A `tenant_access_token` (bot) cannot see any user's
+  personal Drive — the script takes a `user_access_token` via `LARK_USER_TOKEN` or,
+  for cron, `LARK_USER_TOKEN_CMD` (a command printing a fresh one, since these expire
+  in ~2h).
+- **Root discovery:** `drive/explorer/v2/root_folder/meta` returns the personal
+  "My Space" root token. `LARK_DRIVE_FOLDER_TOKEN` overrides it to mirror a specific
+  (possibly shared) folder.
+- **Mixed content:** `drive/v1/files` returns folders, Lark-native docs
+  (`docx`/`sheet`/`bitable`/`mindnote`/`slides`), and uploaded `file`s. Native docs
+  go through the same export→poll→download as wiki; uploaded files are fetched
+  verbatim from `drive/v1/files/{token}/download` with their original extension.
+  Shortcuts are not followed. Unknown types are skipped with a warning.
+- **`modified_time` is coarser than wiki's `last_edit_time`** — it can bump on some
+  metadata-only changes, so the drive adapter re-downloads slightly more than
+  strictly necessary. Acceptable; still far cheaper than a full re-export.
+
+## Renames vs. content edits (wiki)
 
 Lark's `last_edit_time` updates on a **content** edit but not on a pure **retitle**
 (the title lives on the wiki node, the body in the docx object). So:

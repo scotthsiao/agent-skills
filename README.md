@@ -21,7 +21,7 @@ Claude Code, or any agent that reads that format.
 | [`container-service-restart`](container-service-restart/) | Restart a long-running service (a messaging gateway) inside a container with no systemd — precise `pkill`, `.env` sourcing, health check. |
 | [`no-agent-cron-scripts`](no-agent-cron-scripts/) | Cron jobs that must **not** wake the LLM: run a plain script, deliver its stdout verbatim. Deterministic and free. |
 | [`lark-openapi-recipes`](lark-openapi-recipes/) | Reading Lark/Feishu wiki, docx, sheets, and IM from an agent via the OpenAPI — token minting, the crawl that works, the block-type map, the scope walls. |
-| [`lark-wiki-backup`](lark-wiki-backup/) | Snapshot a Lark/Feishu wiki space to versioned local `.docx` files — delta only (new / edited / renamed / deleted), git-committed — plus an optional offsite `.tar.gz`. |
+| [`lark-wiki-backup`](lark-wiki-backup/) | Snapshot a Lark/Feishu **wiki space or personal/shared Drive folder** to versioned local files — delta only (new / edited / renamed / deleted), git-committed — plus an optional offsite `.tar.gz`. |
 | [`messaging-gateway-bot-triage`](messaging-gateway-bot-triage/) | "The bot connected but doesn't answer." A layered decision tree: events not arriving, wrong bot, allowlist, stale session. |
 | [`prompt-layer-permission-guardrail`](prompt-layer-permission-guardrail/) | One shared bot, several users, different powers — enforced in the system prompt. What it does and does not protect against. |
 | [`webhook-tunnel-watchdog`](webhook-tunnel-watchdog/) | Keep an ngrok / cloudflared tunnel alive for an inbound webhook, and publish the current public URL. |
